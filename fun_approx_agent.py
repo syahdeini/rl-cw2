@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-
+import pdb
 from enduro.agent import Agent
 from enduro.action import Action
 
@@ -43,9 +43,9 @@ class FunctionApproximationAgent(Agent):
 
         # initialize parameter with normal value
         mu, sigma = 0, 0.1 # mean and standard deviation
-        self.parameter =   np.random.normal(mu, sigma,((self.num_features,self.len(self.getActionsSet()))))
+        self.features =   np.random.normal(mu, sigma,((self.num_features,len(self.getActionsSet()))))
         # initialize number of features
-        self.features  =  np.zeros((1,self.num_features))
+        self.parameter  =  np.zeros((self.num_features,1))
                 
 
 
@@ -96,7 +96,49 @@ class FunctionApproximationAgent(Agent):
                     state[1] = i + 1
                     break
         return state
+    
 
+
+    def calculateFeatures(self,road,cars,speed,grid):
+        # make feature vector based on the current state
+        # each element of the self.features vector represent one feature
+        
+        # features
+        # feature 1. if there is no car infront of player (min range:3)
+        [[x]] = np.argwhere(grid[0,:] == 2)
+        pos_player = x
+        
+
+        # 0 will sum rows
+        pos_column = np.sum(grid,axis=0) # column [liat kedepan]
+        pos_rows = np.sum(grid,axis=1) # liat ke samping
+
+        # ignore the agent
+        pos_rows[0] -= 2
+        pos_column[pos_player] -= 2
+         pdb.set_trace()
+        #rows = np.sort(np.argwhere(pos_column > 0).flatten())
+        #pos_col_enemy = rows[0] if len(rows)>0 else -1
+        #col = np.sort(np.argwhere(pos_rows > 0).flatten())
+        #pos_row_enemy = rows[0] if len(col)>0 else -1
+
+        # check if car infront of player
+        front_car=grid[:,pos_player]
+        # ignore player
+        front_car[0] -= 2
+        front_car = np.sort(np.argwhere(front_car>0).flatten())
+        # check jarak enemy infront of car
+        if front_car[0] < 3: 
+           self.features[0] = -1
+        else
+           self.features[0] = 1
+        
+        #if pos_column[pos_player] > 0 and 
+
+    def choose_action(self):
+        #np.dot(self.parameters.T,self.features)
+        #using argmax select which action to take
+        pass
     def act(self):
         """ Implements the decision making process for selecting
         an action. Remember to store the obtained reward.
@@ -107,7 +149,8 @@ class FunctionApproximationAgent(Agent):
         # Execute the action and get the received reward signal
 
 
-
+        # calculate Q_s_a and decide which action to take
+            
 
         self.total_reward += self.move(Action.ACCELERATE)
 
@@ -131,7 +174,9 @@ class FunctionApproximationAgent(Agent):
 
         For more information on the arguments have a look at the README.md
         """
-        pass
+        # safe state
+        self.grid = grid
+        self.calculateFeatures(road,cars,speed,grid)
 
     def learn(self):
         """ Performs the learning procedure. It is called after act() and
