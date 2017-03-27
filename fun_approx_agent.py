@@ -8,8 +8,47 @@ from enduro.action import Action
 class FunctionApproximationAgent(Agent):
     def __init__(self):
         super(FunctionApproximationAgent, self).__init__()
-        # Add member variables to your class here
-        self.total_reward = 0
+        # The horizon defines how far the agent can see
+        self.horizon_row = 5
+        self.grid_cols = 10
+        self.num_features = 4
+
+        # The state is defined as a tuple of the agent's x position and the
+        # x position of the closest opponent which is lower than the horizon,
+        # if any is present. There are four actions and so the Q(s, a) table
+        # has size of 10 * (10 + 1) * 4 = 440.
+        self.Q = np.ones((self.grid_cols, self.grid_cols + 1, 4))
+
+        # Add initial bias toward moving forward. This is not necessary,
+        # however it speeds up learning significantly, since the game does
+        # not provide negative reward if no cars have been passed by.
+        self.Q[:, :, 0] += 1.
+
+        # Helper dictionaries that allow us to move from actions to
+        # Q table indices and vice versa
+        self.idx2act = {i: a for i, a in enumerate(self.getActionsSet())}
+        self.act2idx = {a: i for i, a in enumerate(self.getActionsSet())}
+
+        # Learning rate
+        self.alpha = 0.01
+        # Discounting factor
+        self.gamma = 0.9
+        # Exploration rate
+        self.epsilon = 0.01
+
+        # Log the obtained reward during learning
+        self.last_episode = 1
+        self.episode_log = np.zeros(6510) - 1.
+        self.log = []
+
+        # initialize parameter with normal value
+        mu, sigma = 0, 0.1 # mean and standard deviation
+        self.parameter =   np.random.normal(mu, sigma,((self.num_features,self.len(self.getActionsSet()))))
+        # initialize number of features
+        self.features  =  np.zeros((1,self.num_features))
+                
+
+
 
     def initialise(self, road, cars, speed, grid):
         """ Called at the beginning of an episode. Use it to construct
@@ -29,6 +68,34 @@ class FunctionApproximationAgent(Agent):
 
         # Reset the total reward for the episode
         self.total_reward = 0
+        self.total_reward = 0
+        self.next_state = self.buildState(grid)
+    
+    def buildState(self, grid):
+        state = [0, 0]
+
+        # Agent position (assumes the agent is always on row 0)
+        [[x]] = np.argwhere(grid[0, :] == 2)
+        state[0] = x
+
+        # Sum the rows of the grid
+        rows = np.sum(grid, axis=1)
+        # Ignore the agent
+        rows[0] -= 2
+        # Get the closest row where an opponent is present
+        rows = np.sort(np.argwhere(rows > 0).flatten())
+
+        # If any opponent is present
+        if rows.size > 0:
+            # Add the x position of the first opponent on the closest row
+            row = rows[0]
+            for i, g in enumerate(grid[row, :]):
+                if g == 1:
+                    # 0 means that no agent is present and so
+                    # the index is offset by 1
+                    state[1] = i + 1
+                    break
+        return state
 
     def act(self):
         """ Implements the decision making process for selecting
@@ -38,6 +105,10 @@ class FunctionApproximationAgent(Agent):
         # print [Action.toString(a) for a in self.getActionsSet()]
 
         # Execute the action and get the received reward signal
+
+
+
+
         self.total_reward += self.move(Action.ACCELERATE)
 
         # IMPORTANT NOTE:
