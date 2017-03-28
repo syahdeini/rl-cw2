@@ -11,7 +11,7 @@ class FunctionApproximationAgent(Agent):
         # The horizon defines how far the agent can see
         self.horizon_row = 5
         self.grid_cols = 10
-        self.num_features = 3
+        self.num_features = 5
 
         # The state is defined as a tuple of the agent's x position and the
         # x position of the closest opponent which is lower than the horizon,
@@ -86,19 +86,25 @@ class FunctionApproximationAgent(Agent):
         # If exploring
         Q_s = np.dot(self.parameters,self.features.T)[0]
         if np.random.uniform(0., 1.) < self.epsilon:
-            try:
-                probs = np.exp(Q_s) / np.sum(np.exp(Q_s))
-                idx = np.random.choice(4, p=probs)
-                self.action = self.idx2act[idx]
-            except:
-                pdb.set_trace()
+            probs = np.exp(Q_s) / np.sum(np.exp(Q_s))
+            idx = np.random.choice(4, p=probs)
+            self.action = self.idx2act[idx]
+            print("explore")
         else:
             # Select the greedy action
             self.action = self.idx2act[np.argmax(Q_s)]
+            print("features",self.features)
+            print("parameter",self.parameters)
+
+            print("greedy")
+            print('----',Q_s)
+            # cv2.waitKey(200)
+
         self.reward = self.move(self.action)
         self.Q_s = np.dot(self.parameters, self.features[self.act2idx[self.action]].T)[0] # scalar
         self.total_reward += self.reward
-        print(Action.toString(self.action))
+
+        print("ACTION",Action.toString(self.action))
         # IMPORTANT NOTE:
         # 'action' must be one of the values in the actions set,
         # i.e. Action.LEFT, Action.RIGHT, Action.ACCELERATE or Action.BRAKE
@@ -158,36 +164,71 @@ class FunctionApproximationAgent(Agent):
         front_car[0] -= 2
         front_car = np.sort(np.argwhere(front_car>0).flatten())
         # check jarak enemy infront of car
-        if len(front_car)==0 or front_car[0] > 3:
-           self.set_all_feature(0,0)
-           self.meta_features[self.act2idx[Action.ACCELERATE]][0] = 2
-           self.meta_features[self.act2idx[Action.BRAKE]][0]  = -1
-        else:
-           self.meta_features[self.act2idx[Action.BRAKE]][0] = 1
+        if len(front_car)!=0 and front_car[0] < 2:
+           self.meta_features[self.act2idx[Action.BRAKE]][0] = -0.5
            self.meta_features[self.act2idx[Action.LEFT]][0] = 1
            self.meta_features[self.act2idx[Action.RIGHT]][0] = 1
+        else:
+           self.meta_features[self.act2idx[Action.ACCELERATE]][0] = 1
+           self.meta_features[self.act2idx[Action.BRAKE]][0]  = 0
 
          
     def feature2(self,pos_player):
         # check if it near the left wall or right wall and there is an enemy in-front of the player
         self.set_all_feature(1,0)
+        self.meta_features[self.act2idx[Action.ACCELERATE]][1] = 1            
         if pos_player < 2: #it's too left
-           self.meta_features[self.act2idx[Action.RIGHT]][1] = 2            
-           self.meta_features[self.act2idx[Action.LEFT]][1] = -2            
+           self.meta_features[self.act2idx[Action.RIGHT]][1] = 1            
+           self.meta_features[self.act2idx[Action.LEFT]][1] = 0            
         elif pos_player > 8:
-           self.meta_features[self.act2idx[Action.RIGHT]][1] = -2            
-           self.meta_features[self.act2idx[Action.LEFT]][1] = 2            
+           self.meta_features[self.act2idx[Action.RIGHT]][1] = 0            
+           self.meta_features[self.act2idx[Action.LEFT]][1] = 1          
 
-    # if collision happen 
-    def feature3(self,speed):
-        if speed < 0:
+    # if collision happen speed will be negative we encourage right and left
+    def feature3(self,cars):
+        # if cars['others']>0:
+        #     for idx,enemy in enumerate(cars['others']):
+        #         x,y,w,h = enemy
+        #         cars['others'][idx]=(x-1)
+        if self.collision(cars):
             self.meta_features[self.act2idx[Action.RIGHT]][2] = 1            
             self.meta_features[self.act2idx[Action.LEFT]][2] = 1
 
+    # collision already happen
+    def feature4(self,speed):
+        if speed < 0:
+            self.meta_features[self.act2idx[Action.ACCELERATE]][3] = 1           
+    # def feature4(self,spee)
 
+    def feature5(self,pos_player,grid):
+        # pdb.set_trace()
+        front = grid[:,pos_player]
+        front[0] -= 2
+        _front = np.sort(np.argwhere(front > 0).flatten())
+        _front = _front[0] if len(_front)>0 else None
+        left_player = grid[:,pos_player+1]
+        _left = np.sort(np.argwhere(left_player > 0).flatten())
+        _left = _left[0] if len(_left)>0 else None
+        
+        right_player = grid[:,pos_player+1]
+        _right = np.sort(np.argwhere(right_player > 0).flatten())
+        _right = _right[0] if len(_right)>0 else None
+
+        if _left and _right and _front:
+            if _left<3 and _right<3 and _front <3:
+                self.meta_features[self.act2idx[Action.BRAKE]][4] = 1
+                self.meta_features[self.act2idx[Action.RIGHT]][4] = 0.5            
+                self.meta_features[self.act2idx[Action.LEFT]][4] = 0.5
+            elif _left<3 and _right<3:
+                self.meta_features[self.act2idx[Action.ACCELERATE]][4] = 1
+            elif _right<3:
+                self.meta_features[self.act2idx[Action.LEFT]][4] = 1
+            elif _left<3:
+                self.meta_features[self.act2idx[Action.RIGHT]][4]=1
     def calculateFeatures(self,road,cars,speed,grid):
         # features
         # feature 1. if there is no car infront of player (min range:3)
+        ori_grid = np.array(grid)
         self.meta_features =   np.zeros((len(self.getActionsSet()),self.num_features))
         [[x]] = np.argwhere(grid[0,:] == 2)
         pos_player = x
@@ -206,11 +247,11 @@ class FunctionApproximationAgent(Agent):
         # pos_row_enemy = rows[0] if len(col)>0 else -1 
         self.feature1(grid,pos_player)
         self.feature2(pos_player)
-        self.feature3(speed)
-
-        print("jojojo",self.meta_features)
-        print("XXXX",self.parameters)
-
+        self.feature3(cars)
+        self.feature4(speed)
+        self.feature5(pos_player,ori_grid)
+        print("speed",speed)
+        print("pos player",pos_player)
     ### END OF FEATURE ###################
     def buildState(self, grid):
         state = [0, 0]
