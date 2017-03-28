@@ -11,7 +11,7 @@ class FunctionApproximationAgent(Agent):
         # The horizon defines how far the agent can see
         self.horizon_row = 5
         self.grid_cols = 10
-        self.num_features = 4
+        self.num_features = 3
 
         # The state is defined as a tuple of the agent's x position and the
         # x position of the closest opponent which is lower than the horizon,
@@ -43,10 +43,10 @@ class FunctionApproximationAgent(Agent):
 
         # initialize parameter with normal value
         mu, sigma = 0, 0.1 # mean and standard deviation
-        self.features =   np.random.normal(mu, sigma,((self.num_features,len(self.getActionsSet()))))
+        self.features =   np.zeros((len(self.getActionsSet()),self.num_features))
         # initialize number of features
-        self.parameter  =  np.zeros((self.num_features,1))
-                
+        self.parameters  =  np.random.normal(mu, sigma,(1,self.num_features))
+        self.next_features = self.features   
 
 
 
@@ -68,9 +68,150 @@ class FunctionApproximationAgent(Agent):
 
         # Reset the total reward for the episode
         self.total_reward = 0
-        self.total_reward = 0
         self.next_state = self.buildState(grid)
+        
     
+    def act(self):
+        """ Implements the decision making process for selecting
+        an action. Remember to store the obtained reward.
+        """
+        # You can get the set of possible actions and print them with:
+        # print [Action.toString(a) for a in self.getActionsSet()]
+
+        # Execute the action and get the received reward signal
+
+
+        self.features = self.next_features
+        # decide which action to take
+        # If exploring
+        Q_s = np.dot(self.parameters,self.features.T)[0]
+        if np.random.uniform(0., 1.) < self.epsilon:
+            try:
+                probs = np.exp(Q_s) / np.sum(np.exp(Q_s))
+                idx = np.random.choice(4, p=probs)
+                self.action = self.idx2act[idx]
+            except:
+                pdb.set_trace()
+        else:
+            # Select the greedy action
+            self.action = self.idx2act[np.argmax(Q_s)]
+        self.reward = self.move(self.action)
+        self.Q_s = np.dot(self.parameters, self.features[self.act2idx[self.action]].T)[0] # scalar
+        self.total_reward += self.reward
+        print(Action.toString(self.action))
+        # IMPORTANT NOTE:
+        # 'action' must be one of the values in the actions set,
+        # i.e. Action.LEFT, Action.RIGHT, Action.ACCELERATE or Action.BRAKE
+        # Do not use plain integers between 0 - 3 as it will not work
+        pass
+
+    def sense(self, road, cars, speed, grid):
+        """ Constructs the next state from sensory signals.
+
+        Args:
+            road  -- 2-dimensional array containing [x, y] points
+                     in pixel coordinates of the road grid
+            cars  -- dictionary which contains the location and the size
+                     of the agent and the opponents in pixel coordinates
+            speed -- the relative speed of the agent with respect the others
+            gird  -- 2-dimensional numpy array containing the latest grid
+                     representation of the environment
+
+        For more information on the arguments have a look at the README.md
+        """
+        # sense the next state to update s+1
+        # self.next_state = self.buildState(grid)
+        self.calculateFeatures(road,cars,speed,grid)
+        self.next_features = self.meta_features
+
+
+    def learn(self):
+        """ Performs the learning procedure. It is called after act() and
+        sense() so you have access to the latest tuple (s, s', a, r).
+        """
+        # update parameter
+        next_Q_s  = np.dot(self.parameters,self.next_features.T)
+        next_Q_s = np.max(next_Q_s) # scalar
+        _feature = self.features[self.act2idx[self.action]]
+        self.parameters = np.add(self.parameters,self.alpha * (self.reward + self.gamma*(next_Q_s-self.Q_s))* _feature)
+        # print(self.parameters)
+
+
+    def callback(self, learn, episode, iteration):
+        """ Called at the end of each timestep for reporting/debugging purposes.
+        """
+        print "{0}/{1}: {2}".format(episode, iteration, self.total_reward)
+
+        # You could comment this out in order to speed up iterations
+        cv2.imshow("Enduro", self._image)
+        cv2.waitKey(40)
+
+    ### FEATURE ###########################
+    def set_all_feature(self, idx,val):
+        for act in self.getActionsSet():
+            self.meta_features[self.act2idx[act]][idx]=val
+        
+    def feature1(self,grid,pos_player):
+         # check if car infront of player
+        front_car=grid[:,pos_player]
+        # ignore player
+        front_car[0] -= 2
+        front_car = np.sort(np.argwhere(front_car>0).flatten())
+        # check jarak enemy infront of car
+        if len(front_car)==0 or front_car[0] > 3:
+           self.set_all_feature(0,0)
+           self.meta_features[self.act2idx[Action.ACCELERATE]][0] = 2
+           self.meta_features[self.act2idx[Action.BRAKE]][0]  = -1
+        else:
+           self.meta_features[self.act2idx[Action.BRAKE]][0] = 1
+           self.meta_features[self.act2idx[Action.LEFT]][0] = 1
+           self.meta_features[self.act2idx[Action.RIGHT]][0] = 1
+
+         
+    def feature2(self,pos_player):
+        # check if it near the left wall or right wall and there is an enemy in-front of the player
+        self.set_all_feature(1,0)
+        if pos_player < 2: #it's too left
+           self.meta_features[self.act2idx[Action.RIGHT]][1] = 2            
+           self.meta_features[self.act2idx[Action.LEFT]][1] = -2            
+        elif pos_player > 8:
+           self.meta_features[self.act2idx[Action.RIGHT]][1] = -2            
+           self.meta_features[self.act2idx[Action.LEFT]][1] = 2            
+
+    # if collision happen 
+    def feature3(self,speed):
+        if speed < 0:
+            self.meta_features[self.act2idx[Action.RIGHT]][2] = 1            
+            self.meta_features[self.act2idx[Action.LEFT]][2] = 1
+
+
+    def calculateFeatures(self,road,cars,speed,grid):
+        # features
+        # feature 1. if there is no car infront of player (min range:3)
+        self.meta_features =   np.zeros((len(self.getActionsSet()),self.num_features))
+        [[x]] = np.argwhere(grid[0,:] == 2)
+        pos_player = x
+        
+
+        # 0 will sum rows
+        pos_column = np.sum(grid,axis=0) # column [liat kedepan]
+        pos_rows = np.sum(grid,axis=1) # liat ke samping
+
+        # ignore the agent
+        pos_rows[0] -= 2
+        pos_column[pos_player] -= 2
+        # rows = np.sort(np.argwhere(pos_column > 0).flatten())
+        # pos_col_enemy = rows[0] if len(rows)>0 else -1
+        # col = np.sort(np.argwhere(pos_rows > 0).flatten())
+        # pos_row_enemy = rows[0] if len(col)>0 else -1 
+        self.feature1(grid,pos_player)
+        self.feature2(pos_player)
+        self.feature3(speed)
+
+        print("jojojo",self.meta_features)
+        print("XXXX",self.parameters)
+
+    ### END OF FEATURE ###################
     def buildState(self, grid):
         state = [0, 0]
 
@@ -96,104 +237,11 @@ class FunctionApproximationAgent(Agent):
                     state[1] = i + 1
                     break
         return state
-    
-
-
-    def calculateFeatures(self,road,cars,speed,grid):
-        # make feature vector based on the current state
-        # each element of the self.features vector represent one feature
-        
-        # features
-        # feature 1. if there is no car infront of player (min range:3)
-        [[x]] = np.argwhere(grid[0,:] == 2)
-        pos_player = x
-        
-
-        # 0 will sum rows
-        pos_column = np.sum(grid,axis=0) # column [liat kedepan]
-        pos_rows = np.sum(grid,axis=1) # liat ke samping
-
-        # ignore the agent
-        pos_rows[0] -= 2
-        pos_column[pos_player] -= 2
-         pdb.set_trace()
-        #rows = np.sort(np.argwhere(pos_column > 0).flatten())
-        #pos_col_enemy = rows[0] if len(rows)>0 else -1
-        #col = np.sort(np.argwhere(pos_rows > 0).flatten())
-        #pos_row_enemy = rows[0] if len(col)>0 else -1
-
-        # check if car infront of player
-        front_car=grid[:,pos_player]
-        # ignore player
-        front_car[0] -= 2
-        front_car = np.sort(np.argwhere(front_car>0).flatten())
-        # check jarak enemy infront of car
-        if front_car[0] < 3: 
-           self.features[0] = -1
-        else
-           self.features[0] = 1
-        
-        #if pos_column[pos_player] > 0 and 
 
     def choose_action(self):
         #np.dot(self.parameters.T,self.features)
         #using argmax select which action to take
         pass
-    def act(self):
-        """ Implements the decision making process for selecting
-        an action. Remember to store the obtained reward.
-        """
-        # You can get the set of possible actions and print them with:
-        # print [Action.toString(a) for a in self.getActionsSet()]
-
-        # Execute the action and get the received reward signal
-
-
-        # calculate Q_s_a and decide which action to take
-            
-
-        self.total_reward += self.move(Action.ACCELERATE)
-
-        # IMPORTANT NOTE:
-        # 'action' must be one of the values in the actions set,
-        # i.e. Action.LEFT, Action.RIGHT, Action.ACCELERATE or Action.BRAKE
-        # Do not use plain integers between 0 - 3 as it will not work
-        pass
-
-    def sense(self, road, cars, speed, grid):
-        """ Constructs the next state from sensory signals.
-
-        Args:
-            road  -- 2-dimensional array containing [x, y] points
-                     in pixel coordinates of the road grid
-            cars  -- dictionary which contains the location and the size
-                     of the agent and the opponents in pixel coordinates
-            speed -- the relative speed of the agent with respect the others
-            gird  -- 2-dimensional numpy array containing the latest grid
-                     representation of the environment
-
-        For more information on the arguments have a look at the README.md
-        """
-        # safe state
-        self.grid = grid
-        self.calculateFeatures(road,cars,speed,grid)
-
-    def learn(self):
-        """ Performs the learning procedure. It is called after act() and
-        sense() so you have access to the latest tuple (s, s', a, r).
-        """
-        pass
-
-    def callback(self, learn, episode, iteration):
-        """ Called at the end of each timestep for reporting/debugging purposes.
-        """
-        print "{0}/{1}: {2}".format(episode, iteration, self.total_reward)
-
-        # You could comment this out in order to speed up iterations
-        cv2.imshow("Enduro", self._image)
-        cv2.waitKey(40)
-
-
 if __name__ == "__main__":
     a = FunctionApproximationAgent()
     a.run(True, episodes=2000, draw=True)
