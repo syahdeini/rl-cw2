@@ -18,7 +18,7 @@ class Agent(object):
         self._extractor = StateExtractor(self._ale)
         self._image = None
         self._speed_range = 50
-
+        self.file = open("score3.txt","w")
     def run(self, learn, episodes=1, draw=False):
         """ Implements the playing/learning loop.
 
@@ -32,7 +32,7 @@ class Agent(object):
         """
         for e in range(episodes):
             self._relative_speed = -self._speed_range
-
+            # print("EPOCH ",e)
             # Observe the environment to set the initial state
             (road, cars, grid, self._image) = self._extractor.run(draw=draw, scale=4.0)
             self.initialise(road, cars, self._relative_speed, grid)
@@ -57,6 +57,9 @@ class Agent(object):
                     self.learn()
 
                 self.callback(learn, e + 1, self._ale.getFrameNumber() - num_frames)
+            # pdb.set_trace()
+            self.file.write(str(e)+"-"+str(self.total_reward)+"\n")
+            print(str(e)+"-"+str(self.total_reward))
             self._ale.reset_game()
 
     def collision(self, cars):
